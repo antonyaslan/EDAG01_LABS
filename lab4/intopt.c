@@ -5,7 +5,7 @@
 #define E 1e-6
 
 typedef struct simplex_t {
-    int m;          // Number of coefficients
+    int m;          // Number of constraints
     int n;          // Number of decision variables
     int *var;       // Array for variable indices 0..n-1 are nonbasic. size: n + m + 1
     double **a;     // Matrix A. size: m x (n + 2)
@@ -15,6 +15,28 @@ typedef struct simplex_t {
     double y;       // Objective function value y
 } simplex_t;
 
+typedef struct node_t {
+    int m;          // Number of constraints
+    int n;          // Number of decision variables
+    int k;          // Parent branches on xk
+    int h;          // Branch on xh
+    double xh;      // xh
+    double ak;      // Parent ak
+    double bk;      // Parent bk
+    double *min;    // Lower bounds. size: n
+    double *max;    // Upper bounds. size: n
+    double **a;     // Matrix A. size: m x (n + 2)
+    double *b;      // Vector b. size: m
+    double *x;      // Vector x. size: n + 1
+    double *c;      // Vecotr c. size: n
+    double z;       // z
+} node_t;
+
+typedef struct set_t {
+    int count;      // Node count
+    int alloc;      // Nodes allocated
+    node_t **nodes  // Nodes pointers
+} set_t;
 
 double xsimplex(int m, int n, double** a, double* b, double* c, double* x, double y, int* var, int h);
 
@@ -285,7 +307,6 @@ double simplex(int m, int n, double** a, double* b, double* c, double* x, double
     return xsimplex(m, n, a, b, c, x, y, NULL, 0);
 }
 
-
 double** make_matrix(int m, int n) {
     double**    matrix;
     int         i;
@@ -302,14 +323,201 @@ double* make_coeff_vector(int n) {
     return coeff_vector;
 }
 
-double* make_constants(int m, int n) {
-    double* constants = calloc(m + n, sizeof(double));
+double* make_constants(int m) {
+    double* constants = calloc(m , sizeof(double));
     return constants;
 }
 
-double* make_dec_variables(int m, int n) {
-    double* dec_variable_vector = calloc(n + m + 1, sizeof(double));
+double* make_dec_variables(int n) {
+    double* dec_variable_vector = calloc(n, sizeof(double));
     return dec_variable_vector;
+}
+
+node_t * initial_node(int m, int n, double **a, double *b, double *c) {
+    int i;
+    node_t *p = (node_t *) calloc(1, sizeof(node_t));
+    p->a = make_matrix(m+1, n+1);
+    p->b = make_constants(m+1);
+    p->c = make_coeff_vector(n+1);
+    p->x = make_dec_variables(n+1);
+    p->min = make_coeff_vector(n);
+    p->max = make_coeff_vector(n);
+
+    p->m = m;
+    p->n = n;
+    for(i=0; i < m; i++) {
+        memcpy(p->a[i], a[i], n* sizeof(double));
+    }
+    memcpy(p->b, b, m*sizeof(double));
+    memcpy(p->c, c, n*sizeof(double));
+
+    for(i=0; i < n; i++) {
+        p->min[i] = -INFINITY;
+        p->max[i] = INFINITY;
+    }
+
+    return p;
+}
+
+node_t * extend(node_t *p, int m, int n, double **a, double *b, double *c, int k, double ak, double bk) {
+    node_t *q = (node_t *) calloc(1, sizeof(node_t));
+    int i,j;
+    q->k = k;
+    q->ak = ak;
+    q->bk = bk;
+
+    if(ak > 0 && (p->max[k] < INFINITY)) {
+        q->m = p->m;
+    } else if(ak < 0 && (p->min[k] > 0)) {
+        q->m = p->m;
+    } else {
+        q->m = p->m + 1;
+    }
+
+    q->n = p->n;
+
+    q->h = -1;
+
+    q->a = make_matrix(q->m+1, q->n+1); // note normally q->m > m
+    q->b = make_constants(q->m+1);
+    q->c = make_coeff_vector(q->n+1);
+    q->x = make_dec_variables(q->n+1);
+    q->min = make_coeff_vector(n);
+    q->max = make_coeff_vector(n);
+
+    memcpy(q->min, p->min, n*sizeof(double)); // each element and not only pointers
+    memcpy(q->max, p->max, n*sizeof(double)); // each element and not only pointers
+
+    for(i=0; i<m; i++) {
+        memcpy(q->a[i], a[i], n*sizeof(double));
+    }
+    memcpy(q->b, b, m*sizeof(double));
+    memcpy(q->c, c, n*sizeof(double));
+
+    if (ak > 0) {
+        if((q->max[k] == INFINITY) || bk < q->max[k]) {
+            q->max[k] = bk;
+        }
+    } else if ((q->min[k] == -INFINITY) || -bk > q->min[k]) {
+        q->min[k] = -bk;
+    }
+
+    for(i=m, j=0; j<n; j++) {
+        if(q->min[j] > -INFINITY) {
+            q->a[i][j] = -1;
+            q->b[i] = -q->min[j];
+            i++;
+        }
+        if(q->max[j] <INFINITY) {
+            q->a[i][j] = 1;
+            q->b[i] = q->max[j];
+            i++;
+        }
+    }
+    return q;
+}
+
+int is_integer(double *xp) {
+    double x = *xp;
+    double r = lround(x); // ISO C lround
+    if(fabs(r-x) < E) {
+        *xp = r;
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+int integer(node_t *p) {
+    int i;
+    for(i=0; i<p->n; i++) {
+        if(!is_integer(&p->x[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void free_node(node_t* p) {
+    for (int i = 0; i < p->m + 1; i++) {
+        free(p->a[i]);
+    }
+    free(p->a);
+    free(p->b);
+    free(p->c);
+    free(p->x);
+    free(p->min);
+    free(p->max);
+    free(p);
+}
+
+void bound(node_t *p, set_t* h, double *zp, double *x) {
+    int i;
+    if(p->z > *zp) {
+        *zp = p->z;
+        memcpy(x, p->x, (p->n + 1) * sizeof(double));
+
+        for(i=0; i < h->alloc; i++) {
+            if(!h->nodes[i] || h->nodes[i]->z >= p->z) {
+                continue;
+            }
+
+            free_node(h->nodes[i]);
+            h->nodes[i] = NULL;
+            h->count--;
+        }
+    }
+}
+
+int branch(node_t *q, double z) {
+    double min,max;
+    int h;
+    if(q->z < z) {
+        return 0;
+    }
+
+    for(h=0; h < q->n; h++) {
+        if(!is_integer(&q->x[h])) {
+            if(q->min[h] == -INFINITY) {
+                min = 0;
+            } else {
+                min = q->min[h];
+            }
+            max = q->max[h];
+            if ((floor(q->x[h]) < min) || (ceil(q->x[h] > max))) {
+                continue;
+            }
+            q->h = h;
+            q->xh = q->x[h];
+            
+            for (int i = 0; i < q->m + 1; i++) {
+                free(q->a[i]);
+            }
+            free(q->a);
+            free(q->b);
+            free(q->c);
+            free(q->x);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void succ(node_t *p, set_t *h, int m, int n, double **a, double *b, double *c, int k, double ak, double bk, double *zp, double *x) {
+    node_t *q = extend(p, m, n, a, b, c, k, ak, bk);
+
+    if(q==NULL) {
+        return;
+    }
+
+    q->z = simplex(q->m, q->n, q->a, q->b, q->c, q->x, 0);
+    if(isfinite(q->z)) {
+        if (integer(q)) {
+            bound(q, h, zp, x);
+        } else if(branch(q, *zp)) {
+            //NOT FINISHED
+        }
+    }
 }
 
 void print_coeff_equation(double* coeff_vector, int n) {
@@ -419,11 +627,11 @@ int main() {
 
     double** a = make_matrix(m,n);
 
+    double* b = make_constants(m);
+
     double* c = make_coeff_vector(n);
 
-    double* b = make_constants(m, n);
-
-    double* x = make_dec_variables(m, n);
+    double* x = make_dec_variables(n);
 
     for(int j = 0; j < n; j+=1) {
         //printf("Enter coeff %d:\n", j);
