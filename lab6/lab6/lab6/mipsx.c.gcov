@@ -1,0 +1,873 @@
+        -:    0:Source:mipsx.c
+        -:    0:Graph:mipsx.gcno
+        -:    0:Data:mipsx.gcda
+        -:    0:Runs:0
+        -:    1:/*  This is a suite of benchmarks that are relatively short, both in program
+        -:    2:    size and execution time.  It requires no input, and prints the execution
+        -:    3:    time for each program, using the system- dependent routine Getclock,
+        -:    4:    below, to find out the current CPU time.  It does a rudimentary check to
+        -:    5:    make sure each program gets the right output.  These programs were
+        -:    6:    gathered by John Hennessy and modified by Peter Nye. */
+        -:    7:
+        -:    8:#include <stdio.h>
+        -:    9:#include <stdlib.h>
+        -:   10:#include <time.h>
+        -:   11:
+        -:   12:#define  nil		 0
+        -:   13:#define	 false		 0
+        -:   14:#define  true		 1
+        -:   15:#define  bubblebase 	 1.61
+        -:   16:#define  dnfbase 	 3.5
+        -:   17:#define  permbase 	 1.75
+        -:   18:#define  queensbase 	 1.83
+        -:   19:#define  towersbase 	 2.39
+        -:   20:#define  quickbase 	 1.92
+        -:   21:#define  intmmbase 	 1.46
+        -:   22:#define  treebase 	  2.5
+        -:   23:#define  mmbase 	 0.73
+        -:   24:#define  fpmmbase 	 2.92
+        -:   25:#define  puzzlebase 	 0.5
+        -:   26:#define  fftbase 	 1.11
+        -:   27:#define  fpfftbase 	 4.44
+        -:   28:    /* Towers */
+        -:   29:#define maxcells 	 18
+        -:   30:
+        -:   31:    /* Intmm, Mm */
+        -:   32:#define rowsize 	 400
+        -:   33:
+        -:   34:    /* Puzzle */
+        -:   35:#define size	 	 511
+        -:   36:#define classmax 	 3
+        -:   37:#define typemax 	 12
+        -:   38:#define d 		 8
+        -:   39:
+        -:   40:    /* Bubble, Quick */
+        -:   41:#define sortelements 	 300000
+        -:   42:#define srtelements 	 10000
+        -:   43:
+        -:   44:    /* fft */
+        -:   45:#define fftsize 	 256 
+        -:   46:#define fftsize2 	 129  
+        -:   47:
+        -:   48:    /* Perm */
+        -:   49:#define    permrange 13
+        -:   50:
+        -:   51:   /* tree */
+        -:   52:struct node {
+        -:   53:	struct node *left,*right;
+        -:   54:	int val;
+        -:   55:};
+        -:   56:
+        -:   57:    /* Towers */
+        -:   58:#define    stackrange	3
+        -:   59:#define    discs	17
+        -:   60:struct element {
+        -:   61:	int discsize;
+        -:   62:	int next;
+        -:   63:};
+        -:   64:
+        -:   65:    /* FFT */
+        -:   66:struct    complex { float rp, ip; };
+        -:   67:
+        -:   68:float    fixed,floated;
+        -:   69:
+        -:   70:    /* global */
+        -:   71:int    timer;
+        -:   72:int    xtimes[11];
+        -:   73:int    seed;
+        -:   74:
+        -:   75:    /* Perm */
+        -:   76:int    permarray[permrange+1];
+        -:   77:int    pctr;
+        -:   78:
+        -:   79:    /* tree */
+        -:   80:struct node *tree;
+        -:   81:
+        -:   82:    /* Towers */
+        -:   83:int	stack[stackrange+1];
+        -:   84:struct element    cellspace[maxcells+1];
+        -:   85:int	freelist, movesdone;
+        -:   86:
+        -:   87:    /* Intmm, Mm */
+        -:   88:int	ima[rowsize+1][rowsize+1],
+        -:   89:	imb[rowsize+1][rowsize+1],
+        -:   90:	imr[rowsize+1][rowsize+1];
+        -:   91:float	rma[rowsize+1][rowsize+1],
+        -:   92:	rmb[rowsize+1][rowsize+1],
+        -:   93:	rmr[rowsize+1][rowsize+1];
+        -:   94:
+        -:   95:    /* Puzzle */
+        -:   96:int	piececount[classmax+1],
+        -:   97:	class[typemax+1],
+        -:   98:	piecemax[typemax+1],
+        -:   99:	puzzl[size+1],
+        -:  100:	p[typemax+1][size+1],
+        -:  101:	n,
+        -:  102:	kount;
+        -:  103:
+        -:  104:    /* Bubble, Quick */
+        -:  105:int	sortlist[sortelements+1],
+        -:  106:	biggest, littlest,
+        -:  107:	top;
+        -:  108:
+        -:  109:    /* FFT */
+        -:  110:struct complex z[fftsize+1], w[fftsize+1], e[fftsize2+1];
+        -:  111:float    zr, zi;
+        -:  112:
+        -:  113:/* global procedures */
+        -:  114:
+    #####:  115:int Getclock()
+        -:  116:{
+        -:  117:	/* time in milliseconds. */
+    #####:  118:	return 1000*clock() / (double)CLOCKS_PER_SEC;
+        -:  119:}
+        -:  120:
+    #####:  121:void Initrand () {
+    #####:  122:    seed = 74755;
+    #####:  123:}
+        -:  124:
+    #####:  125:int Rand () {
+    #####:  126:    seed = (seed * 1309 + 13849) & 65535;
+    #####:  127:    return (seed);
+        -:  128:}
+        -:  129:
+        -:  130:
+        -:  131:
+        -:  132:/* Permutation program, heavily recursive, written by Denny Brown. */
+        -:  133:
+    #####:  134:void Swap (a,b) int *a, *b; {
+        -:  135:    int t;
+    #####:  136:    t = *a;  *a = *b;  *b = t;
+    #####:  137:}
+        -:  138:
+    #####:  139:void Initialize () {
+        -:  140:    int i;
+    #####:  141:    for ( i = 1; i <= 7; i++ ) {
+    #####:  142:	permarray[i]=i-1;
+        -:  143:    }
+    #####:  144:}
+        -:  145:
+    #####:  146:void Permute (n) int n; {
+        -:  147:    int k;
+    #####:  148:    pctr = pctr + 1;
+    #####:  149:    if ( n!=1 )  {
+    #####:  150:	Permute(n-1);
+    #####:  151:	for ( k = n-1; k >= 1; k-- ) {
+    #####:  152:	    Swap(&permarray[n],&permarray[k]);
+    #####:  153:	    Permute(n-1);
+    #####:  154:	    Swap(&permarray[n],&permarray[k]);
+        -:  155:	}
+        -:  156:    }
+    #####:  157:}
+        -:  158:
+    #####:  159:void Perm () {
+        -:  160:    int i;
+    #####:  161:    pctr = 0;
+    #####:  162:    for ( i = 1; i <= 3; i++ ) {
+    #####:  163:	Initialize();
+    #####:  164:	Permute(permrange-3);
+        -:  165:    }
+    #####:  166:    if ( pctr != 18705903 ) {
+    #####:  167:	printf(" Error in Perm. %d\n", pctr);
+        -:  168:    }
+    #####:  169:}
+        -:  170:
+        -:  171:
+        -:  172:
+        -:  173:/*  Program to Solve the Towers of Hanoi */
+        -:  174:
+    #####:  175:void Error (emsg) char *emsg; {
+    #####:  176:    printf(" Error in Towers: %s\n",emsg);
+    #####:  177:}
+        -:  178:
+    #####:  179:void Makenull (int s) {
+    #####:  180:    stack[s]=0;
+    #####:  181:}
+        -:  182:
+    #####:  183:int Getelement () {
+    #####:  184:    int temp = 0;
+    #####:  185:    if ( freelist>0 ) {
+    #####:  186:	temp = freelist;
+    #####:  187:	freelist = cellspace[freelist].next;
+        -:  188:    } else {
+    #####:  189:	Error("out of space   ");
+        -:  190:    }
+    #####:  191:    return (temp);
+        -:  192:}
+        -:  193:
+    #####:  194:void Push(i,s) int i, s; {
+        -:  195:    int errorfound, localel;
+    #####:  196:    errorfound=false;
+    #####:  197:    if ( stack[s] > 0 ) {
+    #####:  198:	if ( cellspace[stack[s]].discsize<=i ) {
+    #####:  199:	    errorfound=true;
+    #####:  200:	    Error("disc size error");
+        -:  201:	}
+        -:  202:    }
+    #####:  203:    if ( ! errorfound ) {
+    #####:  204:	localel=Getelement();
+    #####:  205:	cellspace[localel].next=stack[s];
+    #####:  206:	stack[s]=localel;
+    #####:  207:	cellspace[localel].discsize=i;
+        -:  208:    }
+    #####:  209:}
+        -:  210:
+    #####:  211:void Init (s,n) int s, n; {
+        -:  212:    int discctr;
+    #####:  213:    Makenull(s);
+    #####:  214:    for ( discctr = n; discctr >= 1; discctr-- ) {
+    #####:  215:	Push(discctr,s);
+        -:  216:    }
+    #####:  217:}
+        -:  218:
+    #####:  219:int Pop (s) int s; {
+        -:  220:    int temp, temp1;
+    #####:  221:    if ( stack[s] > 0 ) {
+    #####:  222:	temp1 = cellspace[stack[s]].discsize;
+    #####:  223:	temp = cellspace[stack[s]].next;
+    #####:  224:	cellspace[stack[s]].next=freelist;
+    #####:  225:	freelist=stack[s];
+    #####:  226:	stack[s]=temp;
+    #####:  227:	return (temp1);
+        -:  228:    } else {
+    #####:  229:	Error("nothing to pop ");
+    #####:  230:	return (-1);
+        -:  231:    }
+        -:  232:}
+        -:  233:
+    #####:  234:void Move (s1,s2) int s1, s2; {
+    #####:  235:    Push(Pop(s1),s2);
+    #####:  236:    movesdone=movesdone+1;
+    #####:  237:}
+        -:  238:
+    #####:  239:void tower(i,j,k) int i,j,k; {
+        -:  240:    int other;
+    #####:  241:    if ( k==1 ) {
+    #####:  242:	Move(i,j);
+        -:  243:    } else {
+    #####:  244:	other=6-i-j;
+    #####:  245:	tower(i,other,k-1);
+    #####:  246:	Move(i,j);
+    #####:  247:	tower(other,j,k-1);
+        -:  248:    }
+    #####:  249:}
+        -:  250:
+        -:  251:
+    #####:  252:void Towers () {
+        -:  253:    int i;
+        -:  254:    int j;
+    #####:  255:    for (j = 0; j < 100; ++j) {
+    #####:  256:    for ( i=1; i <= maxcells; i++ ) {
+    #####:  257:	cellspace[i].next=i-1;
+        -:  258:    }
+    #####:  259:    freelist=maxcells;
+    #####:  260:    Init(1,discs);
+    #####:  261:    Makenull(2);
+    #####:  262:    Makenull(3);
+    #####:  263:    movesdone=0;
+    #####:  264:    tower(1,2,discs);
+    #####:  265:    if ( movesdone != 131071 ) {
+    #####:  266:	printf (" Error in Towers: %d\n", movesdone);
+        -:  267:    }
+        -:  268:    }
+    #####:  269:}
+        -:  270:
+        -:  271:
+        -:  272:/* The eight queens problem, solved 50 times. */
+        -:  273:
+    #####:  274:void Try(i, q, a, b, c, x) int i, *q, a[], b[], c[], x[]; {
+        -:  275:    int j;
+    #####:  276:    j = 0;
+    #####:  277:    *q = false;
+    #####:  278:    while ( (! *q) && (j != 8) ) {
+    #####:  279:	j = j + 1;
+    #####:  280:	*q = false;
+    #####:  281:	if ( b[j] && a[i+j] && c[i-j+7] ) {
+    #####:  282:	    x[i] = j;
+    #####:  283:	    b[j] = false;
+    #####:  284:	    a[i+j] = false;
+    #####:  285:	    c[i-j+7] = false;
+    #####:  286:	    if ( i < 8 ) {
+    #####:  287:		Try(i+1,q,a,b,c,x);
+    #####:  288:		if ( ! *q ) {
+    #####:  289:		    b[j] = true;
+    #####:  290:		    a[i+j] = true;
+    #####:  291:		    c[i-j+7] = true;
+        -:  292:		}
+        -:  293:	    } else {
+    #####:  294:		*q = true;
+        -:  295:	    }
+        -:  296:	}
+        -:  297:    }
+    #####:  298:}
+        -:  299:    
+    #####:  300:void Doit () {
+        -:  301:    int i,q;
+        -:  302:    int a[9], b[17], c[15], x[9];
+    #####:  303:    i = 0 - 7;
+    #####:  304:    while ( i <= 16 ) {
+    #####:  305:	if ( (i >= 1) && (i <= 8) ) a[i] = true;
+    #####:  306:	if ( i >= 2 ) b[i] = true;
+    #####:  307:	if ( i <= 7 ) c[i+7] = true;
+    #####:  308:	i = i + 1;
+        -:  309:    }
+        -:  310:
+    #####:  311:    Try(1, &q, b, a, c, x);
+    #####:  312:    if ( ! q ) {
+    #####:  313:	printf (" Error in Queens.\n");
+        -:  314:    }
+    #####:  315:}
+        -:  316:
+    #####:  317:void Queens () {
+        -:  318:    int i;
+    #####:  319:    for ( i = 1; i <= 100000; i++ ) Doit();
+    #####:  320:}
+        -:  321:
+        -:  322:/* Multiplies two integer matrices. */
+        -:  323:
+    #####:  324:void Initmatrix ( m ) int m[rowsize+1][rowsize+1]; {
+        -:  325:    int temp, i, j;
+    #####:  326:    for ( i = 1; i <= rowsize; i++ ) {
+    #####:  327:	for ( j = 1; j <= rowsize; j++ ) {
+    #####:  328:	    temp = Rand();
+    #####:  329:	    m[i][j] = temp - (temp/120)*120 - 60;
+        -:  330:	}
+        -:  331:    }
+    #####:  332:}
+        -:  333:
+        -:  334:/* computes the inner product of A[row,*] and B[*,column] */
+    #####:  335:void Innerproduct( result,a,b, row,column)
+        -:  336:    int *result,a[rowsize+1][rowsize+1],b[rowsize+1][rowsize+1],row,column;
+        -:  337:{
+        -:  338:    int i;
+    #####:  339:    *result = 0;
+    #####:  340:    for(i = 1; i <= rowsize; i++ ) {
+    #####:  341:	*result = *result+a[row][i]*b[i][column];
+        -:  342:    }
+    #####:  343:}
+        -:  344:
+    #####:  345:void Intmm () {
+        -:  346:    int i, j;
+    #####:  347:    Initrand();
+    #####:  348:    Initmatrix (ima);
+    #####:  349:    Initmatrix (imb);
+    #####:  350:    for ( i = 1; i <= rowsize; i++ ) {
+    #####:  351:	for ( j = 1; j <= rowsize; j++ ) {
+    #####:  352:	    Innerproduct(&imr[i][j],ima,imb,i,j);
+        -:  353:	}
+        -:  354:    }
+    #####:  355:}
+        -:  356:
+        -:  357:/* Multiplies two real matrices. */
+        -:  358:
+    #####:  359:void rInitmatrix ( m ) float m[rowsize+1][rowsize+1]; {
+        -:  360:    int temp, i, j;
+    #####:  361:    for ( i = 1; i <= rowsize; i++ ) {
+    #####:  362:	for ( j = 1; j <= rowsize; j++ ) {
+    #####:  363:	    temp = Rand();
+    #####:  364:	    m[i][j] = (temp - (temp/120)*120 - 60)/3;
+        -:  365:	}
+        -:  366:    }
+    #####:  367:}
+        -:  368:
+        -:  369:    /* computes the inner product of A[row,*] and B[*,column] */
+    #####:  370:void rInnerproduct(result,a,b,row,column)
+        -:  371:    float *result,a[rowsize+1][rowsize+1],b[rowsize+1][rowsize+1];
+        -:  372:    int row,column;
+        -:  373:{
+        -:  374:    int i;
+    #####:  375:    *result = 0.0;
+    #####:  376:    for (i = 1; i<=rowsize; i++) {
+    #####:  377:	*result = *result+a[row][i]*b[i][column];
+        -:  378:    }
+    #####:  379:}
+        -:  380:
+    #####:  381:void Mm () {
+        -:  382:    int i, j;
+    #####:  383:    Initrand();
+    #####:  384:    rInitmatrix (rma);
+    #####:  385:    rInitmatrix (rmb);
+    #####:  386:    for ( i = 1; i <= rowsize; i++ ) {
+    #####:  387:	for ( j = 1; j <= rowsize; j++ ) {
+    #####:  388:	    rInnerproduct(&rmr[i][j],rma,rmb,i,j);
+        -:  389:	}
+        -:  390:    }
+    #####:  391:}
+        -:  392:
+        -:  393:
+        -:  394:
+        -:  395:/* A compute-bound program from Forest Baskett. */
+        -:  396:
+    #####:  397:int Fit (i, j) int i, j; {
+        -:  398:    int k;
+    #####:  399:    for ( k = 0; k <= piecemax[i]; k++ ) {
+    #####:  400:	if ( p[i][k] ) if ( puzzl[j+k] ) return (false);
+        -:  401:    }
+    #####:  402:    return (true);
+        -:  403:}
+        -:  404:
+    #####:  405:int Place (i, j) int i,j; {
+        -:  406:    int k;
+    #####:  407:    for ( k = 0; k <= piecemax[i]; k++ ) {
+    #####:  408:	if ( p[i][k] ) puzzl[j+k] = true;
+        -:  409:    }
+    #####:  410:    piececount[class[i]] = piececount[class[i]] - 1;
+    #####:  411:    for ( k = j; k <= size; k++ ) {
+    #####:  412:	if ( ! puzzl[k] ) {
+    #####:  413:	    return (k);
+        -:  414:	}
+        -:  415:    }
+    #####:  416:    return (0);
+        -:  417:}
+        -:  418:
+    #####:  419:void Remove (i, j) int i, j; {
+        -:  420:    int k;
+    #####:  421:    for ( k = 0; k <= piecemax[i]; k++ ) {
+    #####:  422:	if ( p[i][k] ) puzzl[j+k] = false;
+        -:  423:    }
+    #####:  424:    piececount[class[i]] = piececount[class[i]] + 1;
+    #####:  425:}
+        -:  426:
+    #####:  427:int Trial (j) int j; {
+        -:  428:    int i, k;
+    #####:  429:    kount = kount + 1;
+    #####:  430:    for ( i = 0; i <= typemax; i++ ) {
+    #####:  431:	if ( piececount[class[i]] != 0 ) {
+    #####:  432:	    if ( Fit (i, j) ) {
+    #####:  433:		k = Place (i, j);
+    #####:  434:		if ( Trial(k) || (k == 0) ) {
+    #####:  435:		    return (true);
+        -:  436:		} else {
+    #####:  437:		    Remove (i, j);
+        -:  438:		}
+        -:  439:	    }
+        -:  440:	}
+        -:  441:    }
+    #####:  442:    return (false);
+        -:  443:}
+        -:  444:
+    #####:  445:void Puzzle () {
+        -:  446:    int i, j, k, m, ii;
+    #####:  447:    for (ii = 0; ii < 300; ++ii) {
+        -:  448:
+    #####:  449:    for ( m = 0; m <= size; m++ )
+    #####:  450:	puzzl[m] = true;
+    #####:  451:    for( i = 1; i <= 5; i++ )for( j = 1; j <= 5; j++ )for( k = 1; k <= 5; k++ )
+    #####:  452:	puzzl[i+d*(j+d*k)] = false;
+    #####:  453:    for( i = 0; i <= typemax; i++ )for( m = 0; m<= size; m++ )
+    #####:  454:	p[i][m] = false;
+    #####:  455:    for( i = 0; i <= 3; i++ )for( j = 0; j <= 1; j++ )for( k = 0; k <= 0; k++ )
+    #####:  456:	p[0][i+d*(j+d*k)] = true;
+    #####:  457:    class[0] = 0;
+    #####:  458:    piecemax[0] = 3+d*1+d*d*0;
+    #####:  459:    for( i = 0; i <= 1; i++ )for( j = 0; j <= 0; j++ )for( k = 0; k <= 3; k++ )
+    #####:  460:	p[1][i+d*(j+d*k)] = true;
+    #####:  461:    class[1] = 0;
+    #####:  462:    piecemax[1] = 1+d*0+d*d*3;
+    #####:  463:    for( i = 0; i <= 0; i++ )for( j = 0; j <= 3; j++ )for( k = 0; k <= 1; k++ )
+    #####:  464:	p[2][i+d*(j+d*k)] = true;
+    #####:  465:    class[2] = 0;
+    #####:  466:    piecemax[2] = 0+d*3+d*d*1;
+    #####:  467:    for( i = 0; i <= 1; i++ )for( j = 0; j <= 3; j++ )for( k = 0; k <= 0; k++ )
+    #####:  468:	p[3][i+d*(j+d*k)] = true;
+    #####:  469:    class[3] = 0;
+    #####:  470:    piecemax[3] = 1+d*3+d*d*0;
+    #####:  471:    for( i = 0; i <= 3; i++ )for( j = 0; j <= 0; j++ )for( k = 0; k <= 1; k++ )
+    #####:  472:	p[4][i+d*(j+d*k)] = true;
+    #####:  473:    class[4] = 0;
+    #####:  474:    piecemax[4] = 3+d*0+d*d*1;
+    #####:  475:    for( i = 0; i <= 0; i++ )for( j = 0; j <= 1; j++ )for( k = 0; k <= 3; k++ )
+    #####:  476:	p[5][i+d*(j+d*k)] = true;
+    #####:  477:    class[5] = 0;
+    #####:  478:    piecemax[5] = 0+d*1+d*d*3;
+    #####:  479:    for( i = 0; i <= 2; i++ )for( j = 0; j <= 0; j++ )for( k = 0; k <= 0; k++ )
+    #####:  480:	p[6][i+d*(j+d*k)] = true;
+    #####:  481:    class[6] = 1;
+    #####:  482:    piecemax[6] = 2+d*0+d*d*0;
+    #####:  483:    for( i = 0; i <= 0; i++ )for( j = 0; j <= 2; j++ )for( k = 0; k <= 0; k++ )
+    #####:  484:	p[7][i+d*(j+d*k)] = true;
+    #####:  485:    class[7] = 1;
+    #####:  486:    piecemax[7] = 0+d*2+d*d*0;
+    #####:  487:    for( i = 0; i <= 0; i++ )for( j = 0; j <= 0; j++ )for( k = 0; k <= 2; k++ )
+    #####:  488:	p[8][i+d*(j+d*k)] = true;
+    #####:  489:    class[8] = 1;
+    #####:  490:    piecemax[8] = 0+d*0+d*d*2;
+    #####:  491:    for( i = 0; i <= 1; i++ )for( j = 0; j <= 1; j++ )for( k = 0; k <= 0; k++ )
+    #####:  492:	p[9][i+d*(j+d*k)] = true;
+    #####:  493:    class[9] = 2;
+    #####:  494:    piecemax[9] = 1+d*1+d*d*0;
+    #####:  495:    for( i = 0; i <= 1; i++ )for( j = 0; j <= 0; j++ )for( k = 0; k <= 1; k++ )
+    #####:  496:	p[10][i+d*(j+d*k)] = true;
+    #####:  497:    class[10] = 2;
+    #####:  498:    piecemax[10] = 1+d*0+d*d*1;
+    #####:  499:    for( i = 0; i <= 0; i++ )for( j = 0; j <= 1; j++ )for( k = 0; k <= 1; k++ )
+    #####:  500:	p[11][i+d*(j+d*k)] = true;
+    #####:  501:    class[11] = 2;
+    #####:  502:    piecemax[11] = 0+d*1+d*d*1;
+    #####:  503:    for( i = 0; i <= 1; i++ )for( j = 0; j <= 1; j++ )for( k = 0; k <= 1; k++ )
+    #####:  504:	p[12][i+d*(j+d*k)] = true;
+    #####:  505:    class[12] = 3;
+    #####:  506:    piecemax[12] = 1+d*1+d*d*1;
+    #####:  507:    piececount[0] = 13;
+    #####:  508:    piececount[1] = 3;
+    #####:  509:    piececount[2] = 1;
+    #####:  510:    piececount[3] = 1;
+    #####:  511:    m = 1+d*(1+d*1);
+    #####:  512:    kount = 0;
+    #####:  513:    if ( Fit(0, m) ) {
+    #####:  514:	n = Place(0, m);
+        -:  515:    } else {
+    #####:  516:	printf("Error1 in Puzzle\n");
+        -:  517:    }
+    #####:  518:    if ( ! Trial(n) ) {
+    #####:  519:	printf ("Error2 in Puzzle.\n");
+    #####:  520:    } else if ( kount != 2005 ) {
+    #####:  521:	printf ( "Error3 in Puzzle.\n");
+        -:  522:    }
+        -:  523:    }
+        -:  524:
+    #####:  525:}
+        -:  526:
+        -:  527:/* Sorts an array using quicksort */
+        -:  528:
+    #####:  529:void Initarr() {
+        -:  530:    int i, temp;
+    #####:  531:    Initrand();
+    #####:  532:    biggest = 0; littlest = 0;
+    #####:  533:    for ( i = 1; i <= sortelements; i++ ) {
+    #####:  534:	temp = Rand();
+    #####:  535:	sortlist[i] = temp - (temp/100000)*100000 - 50000;
+    #####:  536:	if ( sortlist[i] > biggest ) {
+    #####:  537:	    biggest = sortlist[i];
+    #####:  538:	} else if ( sortlist[i] < littlest ) {
+    #####:  539:	    littlest = sortlist[i];
+        -:  540:	}
+        -:  541:    }
+    #####:  542:}
+        -:  543:
+        -:  544:    /* quicksort the array a from l to r */
+    #####:  545:void Quicksort( a,l,r) int a[], l, r; {
+        -:  546:    int i,j,x,w;
+        -:  547:
+    #####:  548:    i=l; j=r;
+    #####:  549:    x=a[(l+r) / 2];
+        -:  550:    do {
+    #####:  551:	while ( a[i]<x ) i = i+1;
+    #####:  552:	while ( x<a[j] ) j = j-1;
+    #####:  553:	if ( i<=j ) {
+    #####:  554:	    w = a[i];
+    #####:  555:	    a[i] = a[j];
+    #####:  556:	    a[j] = w;
+    #####:  557:	    i = i+1;    j= j-1;
+        -:  558:	}
+    #####:  559:    } while ( i<=j );
+    #####:  560:    if ( l<j ) Quicksort(a,l,j);
+    #####:  561:    if ( i<r ) Quicksort(a,i,r);
+    #####:  562:}
+        -:  563:
+        -:  564:
+    #####:  565:void Quick () {
+    #####:  566:    Initarr();
+    #####:  567:    Quicksort(sortlist,1,sortelements);
+    #####:  568:    if ( (sortlist[1] != littlest) || (sortlist[sortelements] != biggest) ) {
+    #####:  569:	printf ( " Error in Quick.\n");
+        -:  570:    }
+    #####:  571:}
+        -:  572:
+        -:  573:/* Sorts an array using treesort */
+        -:  574:
+    #####:  575:void tInitarr() {
+        -:  576:    int i, temp;
+    #####:  577:    Initrand();
+    #####:  578:    biggest = 0; littlest = 0;
+    #####:  579:    for ( i = 1; i <= sortelements; i++ ) {
+    #####:  580:	temp = Rand();
+    #####:  581:	sortlist[i] = temp - (temp/100000)*100000 - 50000;
+    #####:  582:	if ( sortlist[i] > biggest ) {
+    #####:  583:	    biggest = sortlist[i];
+    #####:  584:	} else if ( sortlist[i] < littlest ) {
+    #####:  585:	    littlest = sortlist[i];
+        -:  586:	}
+        -:  587:    }
+    #####:  588:}
+        -:  589:
+    #####:  590:void CreateNode (t,n) struct node **t; int n; {
+    #####:  591:    *t = (struct node *)malloc(sizeof(struct node)); 
+    #####:  592:    (*t)->left = nil; (*t)->right = nil;
+    #####:  593:    (*t)->val = n;
+    #####:  594:}
+        -:  595:
+        -:  596:    /* insert n into tree */
+    #####:  597:void Insert(n, t) int n; struct node *t; {
+    #####:  598:    if ( n > t->val ) {
+    #####:  599:	if ( t->left == nil ) {
+    #####:  600:	    CreateNode(&t->left,n);
+        -:  601:	} else {
+    #####:  602:	    Insert(n,t->left);
+        -:  603:	}
+    #####:  604:    } else if ( n < t->val ) {
+    #####:  605:	if ( t->right == nil ) {
+    #####:  606:	    CreateNode(&t->right,n);
+        -:  607:	} else {
+    #####:  608:	    Insert(n,t->right);
+        -:  609:	}
+        -:  610:    }
+    #####:  611:}
+        -:  612:
+        -:  613:    /* check by inorder traversal */
+    #####:  614:int Checktree(p) struct node *p; {
+        -:  615:    int result;
+    #####:  616:    result = true;
+    #####:  617:    if ( p->left != nil ) {
+    #####:  618:        if ( p->left->val <= p->val ) {
+    #####:  619:	    result=false;
+        -:  620:	}
+        -:  621:    } else {
+    #####:  622:	result = Checktree(p->left) && result;
+        -:  623:    }
+    #####:  624:    if ( p->right != nil ) {
+    #####:  625:        if ( p->right->val >= p->val ) {
+    #####:  626:	    result = false;
+        -:  627:	}
+        -:  628:    } else {
+    #####:  629:	result = Checktree(p->right) && result;
+        -:  630:    }
+    #####:  631:    return( result);
+        -:  632:}
+        -:  633:
+    #####:  634:void Trees() {
+        -:  635:    int i;
+    #####:  636:    tInitarr();
+    #####:  637:    tree = (struct node *)malloc(sizeof(struct node)); 
+    #####:  638:    tree->left = nil; tree->right=nil; tree->val=sortlist[1];
+    #####:  639:    for ( i = 2; i <= sortelements; i++ ) Insert(sortlist[i],tree);
+    #####:  640:    if ( ! Checktree(tree) ) printf ( " Error in Tree.\n");
+    #####:  641:}
+        -:  642:
+        -:  643:
+        -:  644:/* Sorts an array using bubblesort */
+        -:  645:
+    #####:  646:void bInitarr() {
+        -:  647:    int i, temp;
+    #####:  648:    Initrand();
+    #####:  649:    biggest = 0; littlest = 0;
+    #####:  650:    for ( i = 1; i <= srtelements; i++ ) {
+    #####:  651:	temp = Rand();
+    #####:  652:	sortlist[i] = temp - (temp/100000)*100000 - 50000;
+    #####:  653:	if ( sortlist[i] > biggest ) {
+    #####:  654:	    biggest = sortlist[i];
+    #####:  655:	} else if ( sortlist[i] < littlest ) {
+    #####:  656:	    littlest = sortlist[i];
+        -:  657:	}
+        -:  658:    }
+    #####:  659:}
+        -:  660:
+    #####:  661:void Bubble() {
+        -:  662:    int i, j;
+    #####:  663:    bInitarr();
+    #####:  664:    top=srtelements;
+        -:  665:
+    #####:  666:    while ( top>1 ) {
+    #####:  667:	i=1;
+    #####:  668:	while ( i<top ) {
+    #####:  669:	    if ( sortlist[i] > sortlist[i+1] ) {
+    #####:  670:		j = sortlist[i];
+    #####:  671:		sortlist[i] = sortlist[i+1];
+    #####:  672:		sortlist[i+1] = j;
+        -:  673:	    }
+    #####:  674:	    i=i+1;
+        -:  675:	}
+    #####:  676:	top=top-1;
+        -:  677:    }
+    #####:  678:    if ( (sortlist[1] != littlest) || (sortlist[srtelements] != biggest) ) {
+    #####:  679:	printf ( "Error3 in Bubble.\n");
+        -:  680:    }
+    #####:  681:}
+        -:  682:
+        -:  683:
+        -:  684:    /* computes cos of x (x in radians) by an expansion */
+    #####:  685:float Cos (x) float x; {
+        -:  686:    int i, factor;
+        -:  687:    float    result,power;
+        -:  688:
+    #####:  689:    result = 1.0; factor = 1;  power = x;
+    #####:  690:    for ( i = 2; i <= 10; i++ ) {
+    #####:  691:	factor = factor * i;  power = power*x;
+    #####:  692:        if ( (i & 1) == 0 )  {
+    #####:  693:	    if ( (i & 3) == 0 ) {
+    #####:  694:		result = result + power/factor;
+        -:  695:	    } else {
+    #####:  696:		result = result - power/factor;
+        -:  697:	    }
+        -:  698:	}
+        -:  699:    }
+    #####:  700:    return (result);
+        -:  701:}
+        -:  702:
+    #####:  703:int Min0( arg1, arg2) int arg1, arg2; {
+    #####:  704:    if ( arg1 < arg2 ) {
+    #####:  705:	return (arg1);
+        -:  706:    } else {
+    #####:  707:	return (arg2);
+        -:  708:    }
+        -:  709:}
+        -:  710:
+    #####:  711:void Printcomplex(  arg1, arg2, zarray, start, finish, increment)
+        -:  712:    int arg1, arg2, start, finish, increment;
+        -:  713:    struct complex zarray[];
+        -:  714:{
+        -:  715:    int i;
+    #####:  716:    printf("\n");
+        -:  717:
+    #####:  718:    i = start;
+        -:  719:    do {
+    #####:  720:	printf("  %15.3e%15.3e",zarray[i].rp,zarray[i].ip);
+    #####:  721:	i = i + increment;
+    #####:  722:	printf("  %15.3e%15.3e",zarray[i].rp,zarray[i].ip);
+    #####:  723:	printf("\n");
+    #####:  724:	i = i + increment;
+    #####:  725:    } while ( i <= finish );
+        -:  726:
+    #####:  727:}
+        -:  728:
+    #####:  729:void Uniform11(iy, yfl) int *iy; float *yfl; {
+    #####:  730:    *iy = (4855* *iy + 1731) & 8191;
+    #####:  731:    *yfl = *iy/8192.0;
+    #####:  732:}
+        -:  733:
+    #####:  734:void Exptab(n, e) int n; struct complex e[]; {
+        -:  735:    float theta, divisor, h[26];
+        -:  736:    int i, j, k, l, m;
+        -:  737:
+    #####:  738:    theta = 3.1415926536;
+    #####:  739:    divisor = 4.0;
+    #####:  740:    for ( i=1; i <= 25; i++ ) {
+    #####:  741:	h[i] = 1/(2*Cos( theta/divisor ));
+    #####:  742:	divisor = divisor + divisor;
+        -:  743:    }
+        -:  744:
+    #####:  745:    m = n / 2;
+    #####:  746:    l = m / 2;
+    #####:  747:    j = 1;
+    #####:  748:    e[1].rp = 1.0;
+    #####:  749:    e[1].ip = 0.0;
+    #####:  750:    e[l+1].rp = 0.0;
+    #####:  751:    e[l+1].ip = 1.0;
+    #####:  752:    e[m+1].rp = -1.0;
+    #####:  753:    e[m+1].ip = 0.0;
+        -:  754:
+        -:  755:    do {
+    #####:  756:	i = l / 2;
+    #####:  757:	k = i;
+        -:  758:
+        -:  759:	do {
+    #####:  760:	    e[k+1].rp = h[j]*(e[k+i+1].rp+e[k-i+1].rp);
+    #####:  761:	    e[k+1].ip = h[j]*(e[k+i+1].ip+e[k-i+1].ip);
+    #####:  762:	    k = k+l;
+    #####:  763:	} while ( k <= m );
+        -:  764:
+    #####:  765:	j = Min0( j+1, 25);
+    #####:  766:	l = i;
+    #####:  767:    } while ( l > 1 );
+        -:  768:
+    #####:  769:}
+        -:  770:
+    #####:  771:void Fft( n, z, w, e, sqrinv)
+        -:  772:    int n; struct complex z[], w[]; struct complex e[]; float sqrinv;
+        -:  773:{
+        -:  774:    int i, j, k, l, m, index;
+    #####:  775:    m = n / 2;
+    #####:  776:    l = 1;
+        -:  777:
+        -:  778:    do {
+    #####:  779:	k = 0;
+    #####:  780:	j = l;
+    #####:  781:	i = 1;
+        -:  782:	do {
+        -:  783:	    do {
+    #####:  784:		w[i+k].rp = z[i].rp+z[m+i].rp;
+    #####:  785:		w[i+k].ip = z[i].ip+z[m+i].ip;
+    #####:  786:		w[i+j].rp = e[k+1].rp*(z[i].rp-z[i+m].rp)
+    #####:  787:		-e[k+1].ip*(z[i].ip-z[i+m].ip);
+    #####:  788:		w[i+j].ip = e[k+1].rp*(z[i].ip-z[i+m].ip)
+    #####:  789:		+e[k+1].ip*(z[i].rp-z[i+m].rp);
+    #####:  790:		i = i+1;
+    #####:  791:	    } while ( i <= j );
+    #####:  792:	    k = j;
+    #####:  793:	    j = k+l;
+    #####:  794:	} while ( j <= m );
+    #####:  795:	index = 1;
+        -:  796:	do {
+    #####:  797:	    z[index] = w[index];
+    #####:  798:	    index = index+1;
+    #####:  799:	} while ( index <= n );
+    #####:  800:	l = l+l;
+    #####:  801:    } while ( l <= m );
+        -:  802:
+    #####:  803:    for ( i = 1; i <= n; i++ ) {
+    #####:  804:	z[i].rp = sqrinv*z[i].rp;
+    #####:  805:	z[i].ip = -sqrinv*z[i].ip;
+        -:  806:    }
+        -:  807:
+    #####:  808:}
+        -:  809:
+    #####:  810:void Oscar() {
+        -:  811:    int i, j;
+    #####:  812:    for (j = 0; j < 1000; ++j) {
+    #####:  813:    Exptab(fftsize,e);
+    #####:  814:    seed = 5767;
+    #####:  815:    for ( i = 1; i <= fftsize; i++ ) {
+    #####:  816:	Uniform11( &seed, &zr );
+    #####:  817:	Uniform11( &seed, &zi );
+    #####:  818:	z[i].rp = 20.0*zr - 10.0;
+    #####:  819:	z[i].ip = 20.0*zi - 10.0;
+        -:  820:    }
+        -:  821:
+    #####:  822:    for ( i = 1; i <= 20; i++ ) {
+    #####:  823:       Fft(fftsize,z,w,e,0.0625);
+        -:  824:       /* Printcomplex( 6, 99, z, 1, 256, 17 ); */
+        -:  825:    }
+        -:  826:    }
+    #####:  827:}
+        -:  828:
+    #####:  829:int main() {
+        -:  830:int i;
+    #####:  831:fixed = 0.0;	floated = 0.0;
+        -:  832:
+        -:  833:
+    #####:  834:printf("    Perm"); timer = Getclock(); Perm();   xtimes[1] = Getclock()-timer;
+    #####:  835:fixed = fixed + permbase*xtimes[1];
+    #####:  836:floated = floated + permbase*xtimes[1];
+    #####:  837:printf("  Towers"); timer = Getclock(); Towers(); xtimes[2] = Getclock()-timer;
+    #####:  838:fixed = fixed + towersbase*xtimes[2];
+    #####:  839:floated = floated + towersbase*xtimes[2];
+    #####:  840:printf("  Queens"); timer = Getclock(); Queens(); xtimes[3] = Getclock()-timer;
+    #####:  841:fixed = fixed + queensbase*xtimes[3];
+    #####:  842:floated = floated + queensbase*xtimes[3];
+    #####:  843:printf("   Intmm"); timer = Getclock(); Intmm();  xtimes[4] = Getclock()-timer;
+    #####:  844:fixed = fixed + intmmbase*xtimes[4];
+    #####:  845:floated = floated + intmmbase*xtimes[4];
+    #####:  846:printf("      Mm"); timer = Getclock(); Mm();     xtimes[5] = Getclock()-timer;
+    #####:  847:fixed = fixed + mmbase*xtimes[5];
+    #####:  848:floated = floated + fpmmbase*xtimes[5];
+    #####:  849:printf("  Puzzle"); timer = Getclock(); Puzzle(); xtimes[6] = Getclock()-timer;
+    #####:  850:fixed = fixed + puzzlebase*xtimes[6];
+    #####:  851:floated = floated + puzzlebase*xtimes[6];
+    #####:  852:printf("   Quick"); timer = Getclock(); Quick();  xtimes[7] = Getclock()-timer;
+    #####:  853:fixed = fixed + quickbase*xtimes[7];
+    #####:  854:floated = floated + quickbase*xtimes[7];
+    #####:  855:printf("  Bubble"); timer = Getclock(); Bubble(); xtimes[8] = Getclock()-timer;
+    #####:  856:fixed = fixed + bubblebase*xtimes[8];
+    #####:  857:floated = floated + bubblebase*xtimes[8];
+    #####:  858:printf("    Tree"); timer = Getclock(); Trees(); xtimes[9] = Getclock()-timer;
+    #####:  859:fixed = fixed + treebase*xtimes[9];
+    #####:  860:floated = floated + treebase*xtimes[9];
+    #####:  861:printf("     FFT"); timer = Getclock(); Oscar(); xtimes[10] = Getclock()-timer;
+    #####:  862:fixed = fixed + fftbase*xtimes[10];
+    #####:  863:floated = floated + fpfftbase*xtimes[10];
+    #####:  864:printf("\n");
+    #####:  865:for ( i = 1; i <= 10; i++ ) printf("%8d", xtimes[i]);
+    #####:  866:printf("\n");
+        -:  867:
+    #####:  868:	return 0;
+        -:  869:}
